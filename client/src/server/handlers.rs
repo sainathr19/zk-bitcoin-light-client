@@ -2,8 +2,9 @@ use alloy_sol_types::SolType;
 use axum::{http::StatusCode, response::Json};
 use fibonacci_lib::PublicValuesStruct;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use sp1_sdk::{include_elf, ProverClient, SP1Stdin};
-use tracing::{info, warn};
+use tracing::warn;
 
 /// The ELF (executable and linkable format) file for the Succinct RISC-V zkVM.
 pub const BITCOIN_PROOF_ELF: &[u8] = include_elf!("fibonacci-program");
@@ -31,7 +32,7 @@ pub struct ProofResponse {
     /// Error message if any
     pub error: Option<String>,
     /// Public values as hex string
-    pub public_values: Option<String>,
+    pub public_values: Option<Value>,
     /// Proof as hex string
     pub proof: Option<String>,
     /// Execution time in milliseconds
@@ -164,40 +165,24 @@ pub async fn generate_bitcoin_proof(
             // Decode and validate the proof results
             match PublicValuesStruct::abi_decode(&public_values) {
                 Ok(validation_result) => {
-                    if validation_result.valid {
-                        info!("Proof generated successfully in {}ms", execution_time);
-                        Ok(Json(ProofResponse {
-                            success: true,
-                            error: None,
-                            public_values: Some(hex::encode(public_values)),
-                            proof: Some(hex::encode(proof)),
-                            execution_time_ms: Some(execution_time),
-                        }))
-                    } else {
-                        warn!(
-                            "Proof generated but validation failed in {}ms",
-                            execution_time
-                        );
-                        Ok(Json(ProofResponse {
-                            success: false,
-                            error: Some(
-                                ProofError::ValidationFailed(
-                                    "Validation failed: invalid hash or merkle proof".to_string(),
-                                )
-                                .to_string(),
-                            ),
-                            public_values: Some(hex::encode(public_values)),
-                            proof: Some(hex::encode(proof)),
-                            execution_time_ms: Some(execution_time),
-                        }))
-                    }
+                    let value = json!({
+                        "target_pubkey_hash": validation_result.target_pubkey_hash,
+                        "total_amount": validation_result.total_amount,
+                    });
+                    Ok(Json(ProofResponse {
+                        success: true,
+                        error: None,
+                        public_values: Some(value),
+                        proof: Some(hex::encode(proof)),
+                        execution_time_ms: Some(execution_time),
+                    }))
                 }
                 Err(e) => {
                     warn!("Failed to decode validation results: {}", e);
                     Ok(Json(ProofResponse {
                         success: false,
                         error: Some(ProofError::DecodeError(e.to_string()).to_string()),
-                        public_values: Some(hex::encode(public_values)),
+                        public_values: None,
                         proof: Some(hex::encode(proof)),
                         execution_time_ms: Some(execution_time),
                     }))
