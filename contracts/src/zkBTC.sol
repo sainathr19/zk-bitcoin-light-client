@@ -6,28 +6,28 @@ import "../lib/sp1-contracts/contracts/lib/openzeppelin-contracts/contracts/acce
 import "../lib/sp1-contracts/contracts/lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC20Permit.sol";
 
 /**
- * @title WBTC (Wrapped Bitcoin)
- * @dev ERC20 token representing wrapped Bitcoin with 8 decimals and 21 million total supply
- * @notice This contract implements WBTC with the same supply cap as Bitcoin (21 million)
+ * @title zkBTC (Zero-Knowledge Bitcoin)
+ * @dev ERC20 token representing zero-knowledge verified Bitcoin with 8 decimals and 21 million total supply
+ * @notice This contract implements zkBTC with the same supply cap as Bitcoin (21 million)
  */
-contract WBTC is ERC20, Ownable, ERC20Permit {
-    /// @notice Maximum supply of WBTC tokens (21 million with 8 decimals)
-    uint256 public constant MAX_SUPPLY = 21_000_000 * 10**8; // 21,000,000 WBTC with 8 decimals
+contract zkBTC is ERC20, Ownable, ERC20Permit {
+    /// @notice Maximum supply of zkBTC tokens (21 million with 8 decimals)
+    uint256 public constant MAX_SUPPLY = 21_000_000 * 10**8; // 21,000,000 zkBTC with 8 decimals
     
-    /// @notice Number of decimals for WBTC (8 decimals like Bitcoin)
+    /// @notice Number of decimals for zkBTC (8 decimals like Bitcoin)
     uint8 public constant DECIMALS = 8;
 
     /**
-     * @dev Constructor that initializes the WBTC token
+     * @dev Constructor that initializes the zkBTC token
      * @param initialOwner The address that will own the contract and receive initial supply
      */
     constructor(address initialOwner) 
-        ERC20("Wrapped Bitcoin", "WBTC") 
+        ERC20("zk BTC", "zkBTC") 
         Ownable(initialOwner)
-        ERC20Permit("Wrapped Bitcoin")
+        ERC20Permit("zk BTC")
     {
-        // Mint the entire supply to the owner
-        _mint(initialOwner, MAX_SUPPLY);
+        // No initial minting - supply starts at zero
+        // Tokens will be minted only through verified Bitcoin transaction proofs
     }
 
     /**
@@ -39,7 +39,7 @@ contract WBTC is ERC20, Ownable, ERC20Permit {
     }
 
     /**
-     * @dev Returns the maximum supply of WBTC tokens
+     * @dev Returns the maximum supply of zkBTC tokens
      * @return The maximum number of tokens that can ever exist
      */
     function maxSupply() public pure returns (uint256) {
@@ -53,7 +53,7 @@ contract WBTC is ERC20, Ownable, ERC20Permit {
      * @notice This function allows the owner to mint tokens up to the maximum supply
      */
     function mint(address to, uint256 amount) public onlyOwner {
-        require(totalSupply() + amount <= MAX_SUPPLY, "WBTC: Cannot exceed maximum supply");
+        require(totalSupply() + amount <= MAX_SUPPLY, "zkBTC: Cannot exceed maximum supply");
         _mint(to, amount);
     }
 
