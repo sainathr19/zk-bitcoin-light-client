@@ -31,12 +31,8 @@ pub struct ProofResponse {
     pub success: bool,
     /// Error message if any
     pub error: Option<String>,
-    /// Block hash (display format)
-    pub block_hash: Option<String>,
     /// Total amount sent to target address
     pub total_amount: Option<u64>,
-    /// Proof as hex string
-    pub proof: Option<String>,
     /// Execution time in milliseconds
     pub execution_time_ms: Option<u64>,
 }
@@ -97,15 +93,13 @@ pub async fn generate_bitcoin_proof(
 
     // Generate proof using the zkVM
     match generate_proof_internal(&stdin).await {
-        Ok((block_hash, total_amount)) => {
+        Ok((_, total_amount)) => {
             let execution_time = start_time.elapsed().as_millis() as u64;
 
             Ok(Json(ProofResponse {
                 success: true,
                 error: None,
-                block_hash: Some(block_hash),
                 total_amount: Some(total_amount),
-                proof: Some("proof_generated".to_string()), // Placeholder
                 execution_time_ms: Some(execution_time),
             }))
         }
@@ -116,9 +110,7 @@ pub async fn generate_bitcoin_proof(
             Ok(Json(ProofResponse {
                 success: false,
                 error: Some(ProofError::ProofGenerationFailed(e.to_string()).to_string()),
-                block_hash: None,
                 total_amount: None,
-                proof: None,
                 execution_time_ms: Some(execution_time),
             }))
         }
