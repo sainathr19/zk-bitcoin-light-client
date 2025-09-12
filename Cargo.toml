@@ -3,6 +3,7 @@ members = [
     "lib",
     "program",
     "script",
+    "client",
 ]
 resolver = "2"
 

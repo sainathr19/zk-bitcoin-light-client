@@ -1,16 +1,8 @@
 [package]
 version = "0.1.0"
-name = "fibonacci-script"
+name = "zk-bitcoin-light-client"
 edition = "2021"
 
-
-[[bin]]
-name = "evm"
-path = "src/bin/evm.rs"
-
-[[bin]]
-name = "vkey"
-path = "src/bin/vkey.rs"
 
 [dependencies]
 sp1-sdk = "5.0.8"

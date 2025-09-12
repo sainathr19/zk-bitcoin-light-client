@@ -5851,6 +5851,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "zk-bitcoin-light-client"
+version = "0.1.0"
+dependencies = [
+ "alloy-sol-types",
+ "anyhow",
+ "axum",
+ "clap",
+ "dotenv",
+ "fibonacci-lib",
+ "hex",
+ "serde",
+ "serde_json",
+ "sp1-build",
+ "sp1-sdk",
+ "tokio",
+ "tower 0.4.13",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "zkhash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
