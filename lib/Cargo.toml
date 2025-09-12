@@ -7,3 +7,5 @@ edition = "2021"
 alloy-sol-types = { workspace = true }
 hex = "0.4.3"
 sha2 = "0.10.9"
+bech32 = "0.9"
+bs58 = "0.5"

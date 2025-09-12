@@ -1,36 +1,31 @@
 #![no_main]
 sp1_zkvm::entrypoint!(main);
 
-use alloy_sol_types::SolType;
-use fibonacci_lib::{verify_bitcoin_tx_hash, verify_merkle_proof, PublicValuesStruct};
+use fibonacci_lib::verify_tx_in_block_and_outputs;
 
 pub fn main() {
     // Read inputs from SP1 stdin
-    let tx_hash = sp1_zkvm::io::read::<String>();
-    let tx = sp1_zkvm::io::read::<String>();
-    let merkle: Vec<[u8; 32]> = sp1_zkvm::io::read::<Vec<[u8; 32]>>();
-    let pos = sp1_zkvm::io::read::<i32>();
-    let merkle_root = sp1_zkvm::io::read::<[u8; 32]>();
+    let tx_hex = sp1_zkvm::io::read::<String>();
+    let expected_txid = sp1_zkvm::io::read::<String>();
+    let merkle_siblings: Vec<String> = sp1_zkvm::io::read::<Vec<String>>();
+    let pos = sp1_zkvm::io::read::<usize>();
+    let block_header = sp1_zkvm::io::read::<String>();
+    let target_address = sp1_zkvm::io::read::<String>();
 
-    // Verify that the transaction hash is correct
-    let hash_valid = verify_bitcoin_tx_hash(&tx_hash, &tx);
-
-    // Verify Merkle inclusion proof
-    let merkle_valid = verify_merkle_proof(
-        hex::decode(tx_hash).unwrap().as_slice().try_into().unwrap(),
-        &merkle,
+    // Verify transaction in block and sum outputs to target address
+    let result = verify_tx_in_block_and_outputs(
+        &tx_hex,
+        &expected_txid,
+        merkle_siblings,
         pos,
-        merkle_root,
+        &block_header,
+        &target_address,
     );
 
-    // Both verifications must pass
-    let overall_valid = hash_valid && merkle_valid;
+    // Verification must pass
+    let (block_hash, total_amount) = result.expect("Transaction verification failed");
 
-    // Encode the result
-    let bytes = PublicValuesStruct::abi_encode(&PublicValuesStruct {
-        valid: overall_valid,
-    });
-
-    // Commit the result to SP1 output
-    sp1_zkvm::io::commit_slice(&bytes);
+    // Commit the results to SP1 output
+    sp1_zkvm::io::commit(&block_hash);
+    sp1_zkvm::io::commit(&total_amount);
 }
