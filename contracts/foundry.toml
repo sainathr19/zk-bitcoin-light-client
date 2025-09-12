@@ -5,3 +5,9 @@ libs = ["lib"]
 fs_permissions = [{ access = "read-write", path = "./" }]
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
+
+# Arbitrum Sepolia RPC URL
+arbitrum_sepolia_rpc_url = "https://sepolia-rollup.arbitrum.io/rpc"
+
+# Etherscan API key for verification (optional)
+etherscan_api_key = "${ETHERSCAN_API_KEY}"

@@ -1,4 +1,4 @@
-use bech32::{convert_bits, decode, Variant};
+use bech32::{convert_bits, decode, u5, Variant};
 use sha2::{Digest, Sha256};
 
 /// Double SHA-256
@@ -182,6 +182,15 @@ fn parse_tx_outputs(tx_hex: &str) -> Result<Vec<(String, u64)>, String> {
     }
     cursor += 4;
 
+    // Check if this is a SegWit transaction (has witness marker)
+    let is_segwit =
+        tx_bytes.len() > 4 && tx_bytes[4] == 0x00 && tx_bytes.len() > 5 && tx_bytes[5] == 0x01;
+
+    if is_segwit {
+        // Skip witness marker (0x00) and flag (0x01)
+        cursor += 2;
+    }
+
     // Parse input count (varint)
     let (input_count, input_count_len) = parse_varint(&tx_bytes[cursor..])?;
     cursor += input_count_len;
@@ -232,8 +241,10 @@ fn parse_tx_outputs(tx_hex: &str) -> Result<Vec<(String, u64)>, String> {
         let script = &tx_bytes[cursor..cursor + script_len as usize];
         cursor += script_len as usize;
 
-        // Extract address from script (simplified - only handles P2PKH)
+        // Extract address from script (handles P2PKH and P2WPKH)
         if let Ok(address) = extract_p2pkh_address(script) {
+            outputs.push((address, value));
+        } else if let Ok(address) = extract_p2wpkh_address(script) {
             outputs.push((address, value));
         }
     }
@@ -302,6 +313,33 @@ fn extract_p2pkh_address(script: &[u8]) -> Result<String, String> {
 
     // Encode to base58
     Ok(bs58::encode(&address_bytes).into_string())
+}
+
+/// Extract P2WPKH address from script
+fn extract_p2wpkh_address(script: &[u8]) -> Result<String, String> {
+    // P2WPKH script: OP_0 OP_PUSHBYTES_20 <20-byte-hash>
+    // Pattern: 0014<20 bytes>
+    if script.len() != 22 || script[0] != 0x00 || script[1] != 0x14 {
+        return Err("not a P2WPKH script".into());
+    }
+
+    let pubkey_hash = &script[2..22];
+
+    // Convert 8-bit bytes to 5-bit groups
+    let converted = convert_bits(pubkey_hash, 8, 5, true)
+        .map_err(|_| "convert_bits failed for P2WPKH".to_string())?;
+
+    // Convert Vec<u8> to Vec<u5> for bech32 encoding
+    let mut data_u5: Vec<u5> = Vec::new();
+    data_u5.push(u5::try_from_u8(0).unwrap()); // witness version 0
+    for byte in converted {
+        data_u5.push(u5::try_from_u8(byte).unwrap());
+    }
+
+    // Encode as bech32
+    Ok(bech32::encode("bc", data_u5, Variant::Bech32)
+        .map_err(|e| format!("bech32 encode failed: {}", e))
+        .unwrap())
 }
 
 /// Combined verification function
@@ -379,6 +417,7 @@ mod tests {
         let result = parse_tx_outputs(tx_hex);
         assert!(result.is_ok());
         let outputs = result.unwrap();
+        dbg!(&outputs);
 
         // Should have 4 outputs
         assert_eq!(outputs.len(), 4);
@@ -411,6 +450,34 @@ mod tests {
         actual_addr_sorted.sort();
 
         assert_eq!(expected_addr_sorted, actual_addr_sorted);
+    }
+
+    #[test]
+    fn test_parse_tx_outputs_new_transaction() {
+        // Test with the new transaction: cce9ac461e348a6863a5ab91a7f23261b6b395337fe59787a7674b996496311d
+        let tx_hex = "02000000000105fcb90a06d2390c467c1189a456ded18ada3aaa44319d9ace0b2e7feaf4bf599a0000000017160014e6b4c5ff28851b556728a07ac6f39c30e8d5338cffffffff9665ad7b601c071dd10d4e5f16eecda6b1a8923572c66c9eac6ea99d03112722000000001716001424e200da3ebf9364302da53a9ea34426ef99e2d5ffffffffcff9b155c625f48d028d81c123411ec30524ad8124b2979f6791db242019ab2e000000001716001418a080e34d1654114c16f69a0fe198b7303b0339ffffffff852a1fd197008c669cc29cbe007e585facf45a7eaa724a3c298737942e6b90850100000000ffffffff66f159174c8d670ec596819c7aba0e68c15701c9924527b44343a35a8235274a0100000000ffffffff024ae98100000000001600145b983b1242987fab8dedad0358e2d294534ab95b081400000000000016001480b6e1230a6b2ffe47a2a54cb43054dbf113c95902473044022057a2196d29b66b790c013baa60eb0de5d2239ef74e3d0823c2d833aed2dc0af602204af18daff3f5b1c9c8404586964deded9484ca3e904f7ddc17b8795c0b6a884801210200746b4cccbff680f23f86fbd69cbe1a5140cea10744aea67991f4e3f0009164024730440220361e863eb5b1579ec8f732d5af99db0d5f182f9f12e53777452825d8a2e9050202202bc738c13b1a6a4382f8b5779e0b86862684704a02f70dfe7b0edfef26439a9a01210227d231e32ddaaa3c276e98bf4a50197d753f1a30505d829e9a0453945d94970102473044022028dbeb2d9e5d758676b10d168a947d87789a0e79a4a05b4eb51fb8a5dd5f08f9022030c760ea64f609d21027f3b552cb04cc4fff1ad1e21e7b9a0194930c5590b04601210226e68b416d21c0fbb393312b0ba25ce16ec57529ccc72452af5e5ece52d19e8202473044022069a29449588622ef7284e0eef08e1f0b814390e05cd746cf1e5f195b6f20796102204f74e333bd66c12dfd57c53ae4af4d911463fccf80982f25cc8c7bffb8b8bb1a012102aadde2bccb94dac97bd6904d33053d8ed9f514425b2cc277184f4b9fb9c002cd0247304402205b9ec23e409392a95b7c752c2ffeb94b4530fbd679fe1cedc21725b7dc0bc2960220391e91692bee0c04fff1c008ee1020fde1a842551873a0a96423bd1904d0c0d601210265d2453707c07b2b10b0411473aba1f1b84aa3de6968f6cf893b8b63a2f36b3900000000";
+
+        let result = parse_tx_outputs(tx_hex);
+        println!("Parse result: {:?}", result);
+
+        if let Ok(outputs) = result {
+            println!("Number of outputs: {}", outputs.len());
+            for (i, (addr, value)) in outputs.iter().enumerate() {
+                println!("Output {}: address={}, value={}", i, addr, value);
+            }
+
+            // Expected from API: 2 outputs
+            // 1. bc1qtwvrkyjznpl6hr0d45p43ckjj3f54w2m89j4n2 - 8513866 satoshis
+            // 2. bc1qszmwzgc2dvhlu3az54xtgvz5m0c38j2eklg80q - 5128 satoshis
+            assert_eq!(outputs.len(), 2);
+
+            // Check values
+            let values: Vec<u64> = outputs.iter().map(|(_, v)| *v).collect();
+            assert!(values.contains(&8513866));
+            assert!(values.contains(&5128));
+        } else {
+            panic!("Failed to parse transaction outputs: {:?}", result.err());
+        }
     }
 
     #[test]
