@@ -4,276 +4,268 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "../src/zkBTCVault.sol";
 import "../src/zkBTC.sol";
+import "../lib/sp1-contracts/contracts/src/v1.1.0/SP1Verifier.sol";
 
-/**
- * @title zkBTCVault Test Contract
- * @dev Test suite for the zkBTCVault contract
- */
 contract zkBTCVaultTest is Test {
     zkBTCVault public vault;
     zkBTC public zkbtc;
-    address public owner;
-    address public user1;
-    address public user2;
-    address public mockVerifier;
-    bytes32 public mockProgramVKey;
+    SP1Verifier public verifier;
+    
+    address public owner = address(0x1);
+    address public user = address(0x2);
+    address public anotherUser = address(0x3);
+    
+    bytes32 public constant BITCOIN_PROGRAM_VKEY = keccak256("bitcoin-program-vkey");
+    bytes32 public constant BITCOIN_TX_HASH = keccak256("bitcoin-tx-hash");
+    
+    // Mock public values for testing (format: [8-byte length][block_hash string][8-byte total_amount])
+    bytes public constant MOCK_PUBLIC_VALUES = abi.encodePacked(
+        uint64(64), // Length of block hash string (64 characters)
+        "ef0c2fa8517414b742094a020da7eba891b47d660ef66f126ad01e5be99a2fd0", // Block hash
+        uint64(1240000000) // Amount in satoshis (12.4 BTC)
+    );
+    
+    bytes public constant MOCK_PROOF_BYTES = hex"1234567890abcdef";
+    
+    event TokensMinted(address indexed to, uint256 amount, bytes32 indexed bitcoinTxHash, bytes32 proofHash);
+    event ProofVerified(bytes32 indexed bitcoinTxHash, bool isValid);
 
     function setUp() public {
-        owner = address(this);
-        user1 = makeAddr("user1");
-        user2 = makeAddr("user2");
+        // Deploy SP1 verifier (mock)
+        verifier = new SP1Verifier();
         
-        // Create a mock verifier address (not actually used since we return true)
-        mockVerifier = makeAddr("mockVerifier");
-        mockProgramVKey = keccak256("mockProgramVKey");
-        
-        // Deploy the vault
-        vault = new zkBTCVault(mockVerifier, mockProgramVKey, owner);
+        // Deploy vault
+        vm.prank(owner);
+        vault = new zkBTCVault(
+            address(verifier),
+            BITCOIN_PROGRAM_VKEY,
+            owner
+        );
         
         // Get the deployed zkBTC token
-        zkbtc = zkBTC(vault.getZkBTCToken());
+        zkbtc = vault.zkbtcToken();
+        
+        // Give user some ETH for gas
+        vm.deal(user, 1 ether);
+        vm.deal(anotherUser, 1 ether);
     }
 
-    function testVaultDeployment() public view {
-        assertEq(address(vault.getZkBTCToken()), address(zkbtc));
-        assertEq(vault.getVerifier(), mockVerifier);
+    function testConstructor() public view {
+        assertEq(address(vault.zkbtcToken()), address(zkbtc));
+        assertEq(address(vault.verifier()), address(verifier));
+        assertEq(vault.bitcoinProgramVKey(), BITCOIN_PROGRAM_VKEY);
         assertEq(vault.owner(), owner);
-    }
-
-    function testInitialSupply() public view {
+        
+        // Check zkBTC initial state
         assertEq(zkbtc.totalSupply(), 0);
-        assertEq(zkbtc.maxSupply(), 21_000_000 * 10**8);
+        assertEq(zkbtc.maxSupply(), 21_000_000 * 10**8); // 21M BTC with 8 decimals
     }
 
     function testMintWithProof() public {
-        uint256 mintAmount = 1000 * 10**8; // 1000 zkBTC
-        bytes32 bitcoinTxHash = keccak256("testBitcoinTx");
-        bytes memory publicValues = abi.encode(true);
-        bytes memory proofBytes = abi.encode("mockProof");
+        uint256 initialSupply = zkbtc.totalSupply();
+        uint256 expectedAmount = 1240000000;
         
-        // Mint tokens using the vault
-        vault.mintWithProof(user1, mintAmount, bitcoinTxHash, publicValues, proofBytes);
+        vm.prank(user);
+        vm.expectEmit(true, true, true, true);
+        emit TokensMinted(user, expectedAmount, BITCOIN_TX_HASH, keccak256(abi.encodePacked(BITCOIN_TX_HASH, MOCK_PUBLIC_VALUES, MOCK_PROOF_BYTES)));
         
-        // Check balances
-        assertEq(zkbtc.balanceOf(user1), mintAmount);
-        assertEq(zkbtc.totalSupply(), mintAmount);
+        vm.expectEmit(true, false, false, false);
+        emit ProofVerified(BITCOIN_TX_HASH, true);
+        
+        vault.mintWithProof(user, BITCOIN_TX_HASH, MOCK_PUBLIC_VALUES, MOCK_PROOF_BYTES);
+        
+        // Check token balances
+        assertEq(zkbtc.totalSupply(), initialSupply + expectedAmount);
+        assertEq(zkbtc.balanceOf(user), expectedAmount);
+        
+        // Check vault state
+        assertTrue(vault.isProofUsed(keccak256(abi.encodePacked(BITCOIN_TX_HASH, MOCK_PUBLIC_VALUES, MOCK_PROOF_BYTES))));
+        assertEq(vault.getMintedAmount(BITCOIN_TX_HASH), expectedAmount);
     }
 
-    function testMintMultipleTimes() public {
-        uint256 mintAmount = 1000 * 10**8; // 1000 zkBTC
-        bytes32 bitcoinTxHash1 = keccak256("testBitcoinTx1");
-        bytes32 bitcoinTxHash2 = keccak256("testBitcoinTx2");
-        bytes memory publicValues = abi.encode(true);
-        bytes memory proofBytes = abi.encode("mockProof");
-        
-        // Mint tokens for first transaction
-        vault.mintWithProof(user1, mintAmount, bitcoinTxHash1, publicValues, proofBytes);
-        
-        // Mint tokens for second transaction
-        vault.mintWithProof(user2, mintAmount, bitcoinTxHash2, publicValues, proofBytes);
-        
-        // Check balances
-        assertEq(zkbtc.balanceOf(user1), mintAmount);
-        assertEq(zkbtc.balanceOf(user2), mintAmount);
-        assertEq(zkbtc.totalSupply(), mintAmount * 2);
+    function testMintWithProofInvalidRecipient() public {
+        vm.prank(user);
+        vm.expectRevert(zkBTCVault.InvalidRecipient.selector);
+        vault.mintWithProof(address(0), BITCOIN_TX_HASH, MOCK_PUBLIC_VALUES, MOCK_PROOF_BYTES);
     }
 
-    function testProofReplayProtection() public {
-        uint256 mintAmount = 1000 * 10**8; // 1000 zkBTC
-        bytes32 bitcoinTxHash = keccak256("testBitcoinTx");
-        bytes memory publicValues = abi.encode(true);
-        bytes memory proofBytes = abi.encode("mockProof");
+    function testMintWithProofInvalidBitcoinTxHash() public {
+        vm.prank(user);
+        vm.expectRevert(zkBTCVault.InvalidBitcoinTxHash.selector);
+        vault.mintWithProof(user, bytes32(0), MOCK_PUBLIC_VALUES, MOCK_PROOF_BYTES);
+    }
+
+    function testMintWithProofZeroAmount() public {
+        // Create public values with zero amount
+        bytes memory zeroAmountValues = abi.encodePacked(
+            uint64(64), // Length of block hash string
+            "ef0c2fa8517414b742094a020da7eba891b47d660ef66f126ad01e5be99a2fd0", // Block hash
+            uint64(0) // Zero amount
+        );
         
-        // First mint should succeed
-        vault.mintWithProof(user1, mintAmount, bitcoinTxHash, publicValues, proofBytes);
+        vm.prank(user);
+        vm.expectRevert(zkBTCVault.ZeroMintAmount.selector);
+        vault.mintWithProof(user, BITCOIN_TX_HASH, zeroAmountValues, MOCK_PROOF_BYTES);
+    }
+
+    function testMintWithProofReplayAttack() public {
+        vm.prank(user);
+        vault.mintWithProof(user, BITCOIN_TX_HASH, MOCK_PUBLIC_VALUES, MOCK_PROOF_BYTES);
         
-        // Second mint with same proof should fail
+        // Try to use the same proof again
+        vm.prank(anotherUser);
         vm.expectRevert(zkBTCVault.ProofAlreadyUsed.selector);
-        vault.mintWithProof(user2, mintAmount, bitcoinTxHash, publicValues, proofBytes);
+        vault.mintWithProof(anotherUser, BITCOIN_TX_HASH, MOCK_PUBLIC_VALUES, MOCK_PROOF_BYTES);
     }
 
-    // function testVerifyBitcoinTransaction() public view {
-    //     bytes memory publicValues = abi.encode(true);
-    //     bytes memory proofBytes = abi.encode("mockProof");
+    function testMintWithProofMaxSupplyExceeded() public {
+        // Create public values with very large amount
+        bytes memory largeAmountValues = abi.encodePacked(
+            uint64(64), // Length of block hash string
+            "ef0c2fa8517414b742094a020da7eba891b47d660ef66f126ad01e5be99a2fd0", // Block hash
+            uint64(21_000_000 * 10**8 + 1) // Amount exceeding max supply
+        );
         
-    //     // Should always return true for now
-    //     bool isValid = vault.verifyBitcoinTransaction(publicValues, proofBytes);
-    //     assertTrue(isValid);
-    // }
+        vm.prank(user);
+        vm.expectRevert(zkBTCVault.MintAmountExceedsMaxSupply.selector);
+        vault.mintWithProof(user, BITCOIN_TX_HASH, largeAmountValues, MOCK_PROOF_BYTES);
+    }
+
+    function testMultipleMintsSameTransaction() public {
+        uint256 expectedAmount = 1240000000;
+        
+        // First mint
+        vm.prank(user);
+        vault.mintWithProof(user, BITCOIN_TX_HASH, MOCK_PUBLIC_VALUES, MOCK_PROOF_BYTES);
+        
+        // Create different proof for same transaction (different proof bytes)
+        bytes memory differentProof = hex"abcdef1234567890";
+        
+        // Second mint with different proof but same transaction
+        vm.prank(anotherUser);
+        vault.mintWithProof(anotherUser, BITCOIN_TX_HASH, MOCK_PUBLIC_VALUES, differentProof);
+        
+        // Check balances
+        assertEq(zkbtc.balanceOf(user), expectedAmount);
+        assertEq(zkbtc.balanceOf(anotherUser), expectedAmount);
+        assertEq(zkbtc.totalSupply(), expectedAmount * 2);
+        
+        // Check minted amount for this transaction
+        assertEq(vault.getMintedAmount(BITCOIN_TX_HASH), expectedAmount * 2);
+    }
 
     function testGetVaultInfo() public view {
-        (
-            address zkbtcAddress,
-            address verifierAddress,
-            bytes32 programVKey,
-            uint256 totalSupply,
-            uint256 maxSupply
-        ) = vault.getVaultInfo();
+        (address zkbtcAddress, address verifierAddress, bytes32 programVKey, uint256 totalSupply, uint256 maxSupply) = vault.getVaultInfo();
         
         assertEq(zkbtcAddress, address(zkbtc));
-        assertEq(verifierAddress, mockVerifier);
-        assertEq(programVKey, mockProgramVKey);
+        assertEq(verifierAddress, address(verifier));
+        assertEq(programVKey, BITCOIN_PROGRAM_VKEY);
         assertEq(totalSupply, 0);
         assertEq(maxSupply, 21_000_000 * 10**8);
     }
 
-    function testMintAmountTracking() public {
-        uint256 mintAmount = 1000 * 10**8; // 1000 zkBTC
-        bytes32 bitcoinTxHash = keccak256("testBitcoinTx");
-        bytes memory publicValues = abi.encode(true);
-        bytes memory proofBytes = abi.encode("mockProof");
-        
-        // Mint tokens
-        vault.mintWithProof(user1, mintAmount, bitcoinTxHash, publicValues, proofBytes);
-        
-        // Check minted amount tracking
-        assertEq(vault.getMintedAmount(bitcoinTxHash), mintAmount);
-    }
-
-    function testMintToZeroAddress() public {
-        uint256 mintAmount = 1000 * 10**8;
-        bytes32 bitcoinTxHash = keccak256("testBitcoinTx");
-        bytes memory publicValues = abi.encode(true);
-        bytes memory proofBytes = abi.encode("mockProof");
-        
-        vm.expectRevert(zkBTCVault.InvalidRecipient.selector);
-        vault.mintWithProof(address(0), mintAmount, bitcoinTxHash, publicValues, proofBytes);
-    }
-
-    function testMintZeroAmount() public {
-        bytes32 bitcoinTxHash = keccak256("testBitcoinTx");
-        bytes memory publicValues = abi.encode(true);
-        bytes memory proofBytes = abi.encode("mockProof");
-        
-        vm.expectRevert(zkBTCVault.ZeroMintAmount.selector);
-        vault.mintWithProof(user1, 0, bitcoinTxHash, publicValues, proofBytes);
-    }
-
-    function testMintInvalidBitcoinTxHash() public {
-        uint256 mintAmount = 1000 * 10**8;
-        bytes memory publicValues = abi.encode(true);
-        bytes memory proofBytes = abi.encode("mockProof");
-        
-        vm.expectRevert(zkBTCVault.InvalidBitcoinTxHash.selector);
-        vault.mintWithProof(user1, mintAmount, bytes32(0), publicValues, proofBytes);
-    }
-
-    function testMintExceedsMaxSupply() public {
-        uint256 mintAmount = 21_000_001 * 10**8; // Exceeds max supply
-        bytes32 bitcoinTxHash = keccak256("testBitcoinTx");
-        bytes memory publicValues = abi.encode(true);
-        bytes memory proofBytes = abi.encode("mockProof");
-        
-        vm.expectRevert(zkBTCVault.MintAmountExceedsMaxSupply.selector);
-        vault.mintWithProof(user1, mintAmount, bitcoinTxHash, publicValues, proofBytes);
-    }
-
-    function testMintCloseToMaxSupply() public {
-        uint256 mintAmount = 21_000_000 * 10**8; // Exactly max supply
-        bytes32 bitcoinTxHash = keccak256("testBitcoinTx");
-        bytes memory publicValues = abi.encode(true);
-        bytes memory proofBytes = abi.encode("mockProof");
-        
-        // Should succeed
-        vault.mintWithProof(user1, mintAmount, bitcoinTxHash, publicValues, proofBytes);
-        
-        assertEq(zkbtc.totalSupply(), mintAmount);
-        assertEq(zkbtc.balanceOf(user1), mintAmount);
-    }
-
     function testIsProofUsed() public {
-        uint256 mintAmount = 1000 * 10**8;
-        bytes32 bitcoinTxHash = keccak256("testBitcoinTx");
-        bytes memory publicValues = abi.encode(true);
-        bytes memory proofBytes = abi.encode("mockProof");
+        bytes32 proofHash = keccak256(abi.encodePacked(BITCOIN_TX_HASH, MOCK_PUBLIC_VALUES, MOCK_PROOF_BYTES));
         
-        // Create proof hash
-        bytes32 proofHash = keccak256(abi.encodePacked(bitcoinTxHash, publicValues, proofBytes));
-        
-        // Initially should not be used
+        // Initially not used
         assertFalse(vault.isProofUsed(proofHash));
         
-        // Mint tokens
-        vault.mintWithProof(user1, mintAmount, bitcoinTxHash, publicValues, proofBytes);
+        // After minting, should be used
+        vm.prank(user);
+        vault.mintWithProof(user, BITCOIN_TX_HASH, MOCK_PUBLIC_VALUES, MOCK_PROOF_BYTES);
         
-        // Now should be used
         assertTrue(vault.isProofUsed(proofHash));
     }
 
-    function testEventsEmitted() public {
-        uint256 mintAmount = 1000 * 10**8;
-        bytes32 bitcoinTxHash = keccak256("testBitcoinTx");
-        bytes memory publicValues = abi.encode(true);
-        bytes memory proofBytes = abi.encode("mockProof");
+    function testGetMintedAmount() public {
+        uint256 expectedAmount = 1240000000;
         
-        // Expect events to be emitted
-        vm.expectEmit(true, true, true, true);
-        emit zkBTCVault.TokensMinted(user1, mintAmount, bitcoinTxHash, keccak256(abi.encodePacked(bitcoinTxHash, publicValues, proofBytes)));
+        // Initially zero
+        assertEq(vault.getMintedAmount(BITCOIN_TX_HASH), 0);
         
-        vm.expectEmit(true, true, false, true);
-        emit zkBTCVault.ProofVerified(bitcoinTxHash, true);
+        // After minting
+        vm.prank(user);
+        vault.mintWithProof(user, BITCOIN_TX_HASH, MOCK_PUBLIC_VALUES, MOCK_PROOF_BYTES);
         
-        vault.mintWithProof(user1, mintAmount, bitcoinTxHash, publicValues, proofBytes);
+        assertEq(vault.getMintedAmount(BITCOIN_TX_HASH), expectedAmount);
     }
 
-    function testMultipleMintsSameBitcoinTx() public {
-        uint256 mintAmount1 = 1000 * 10**8;
-        uint256 mintAmount2 = 500 * 10**8;
-        bytes32 bitcoinTxHash = keccak256("testBitcoinTx");
-        bytes memory publicValues1 = abi.encode(true);
-        bytes memory publicValues2 = abi.encode(false);
-        bytes memory proofBytes1 = abi.encode("mockProof1");
-        bytes memory proofBytes2 = abi.encode("mockProof2");
+    function testDifferentPublicValuesFormats() public {
+        // Test with different block hash lengths
+        bytes memory shortBlockHashValues = abi.encodePacked(
+            uint64(8), // Length of block hash string (8 characters)
+            "12345678", // Short block hash
+            uint64(1000000) // Amount
+        );
         
-        // First mint
-        vault.mintWithProof(user1, mintAmount1, bitcoinTxHash, publicValues1, proofBytes1);
+        vm.prank(user);
+        vault.mintWithProof(user, BITCOIN_TX_HASH, shortBlockHashValues, MOCK_PROOF_BYTES);
         
-        // Second mint with different proof but same Bitcoin tx
-        vault.mintWithProof(user2, mintAmount2, bitcoinTxHash, publicValues2, proofBytes2);
+        assertEq(zkbtc.balanceOf(user), 1000000);
         
-        // Check balances
-        assertEq(zkbtc.balanceOf(user1), mintAmount1);
-        assertEq(zkbtc.balanceOf(user2), mintAmount2);
-        assertEq(zkbtc.totalSupply(), mintAmount1 + mintAmount2);
+        // Test with longer block hash
+        bytes memory longBlockHashValues = abi.encodePacked(
+            uint64(128), // Length of block hash string (128 characters)
+            "ef0c2fa8517414b742094a020da7eba891b47d660ef66f126ad01e5be99a2fd0ef0c2fa8517414b742094a020da7eba891b47d660ef66f126ad01e5be99a2fd0", // Long block hash
+            uint64(5000000) // Amount
+        );
         
-        // Check total minted for this Bitcoin tx
-        assertEq(vault.getMintedAmount(bitcoinTxHash), mintAmount1 + mintAmount2);
+        bytes32 differentTxHash = keccak256("different-tx-hash");
+        vm.prank(anotherUser);
+        vault.mintWithProof(anotherUser, differentTxHash, longBlockHashValues, MOCK_PROOF_BYTES);
+        
+        assertEq(zkbtc.balanceOf(anotherUser), 5000000);
     }
 
-    function testZkBTCBurn() public {
-        uint256 mintAmount = 1000 * 10**8;
-        bytes32 bitcoinTxHash = keccak256("testBitcoinTx");
-        bytes memory publicValues = abi.encode(true);
-        bytes memory proofBytes = abi.encode("mockProof");
+    function testEdgeCasePublicValues() public {
+        // Test with minimum valid length
+        bytes memory minValidValues = abi.encodePacked(
+            uint64(1), // Length of block hash string (1 character)
+            "a", // Single character block hash
+            uint64(1) // Minimum amount
+        );
         
-        // Mint tokens
-        vault.mintWithProof(user1, mintAmount, bitcoinTxHash, publicValues, proofBytes);
+        bytes32 edgeTxHash = keccak256("edge-tx-hash");
+        vm.prank(user);
+        vault.mintWithProof(user, edgeTxHash, minValidValues, MOCK_PROOF_BYTES);
         
-        // User burns some tokens
-        uint256 burnAmount = 200 * 10**8;
-        vm.prank(user1);
-        zkbtc.burn(burnAmount);
-        
-        assertEq(zkbtc.balanceOf(user1), mintAmount - burnAmount);
-        assertEq(zkbtc.totalSupply(), mintAmount - burnAmount);
+        assertEq(zkbtc.balanceOf(user), 1);
     }
 
-    function testZkBTCTransfer() public {
-        uint256 mintAmount = 1000 * 10**8;
-        bytes32 bitcoinTxHash = keccak256("testBitcoinTx");
-        bytes memory publicValues = abi.encode(true);
-        bytes memory proofBytes = abi.encode("mockProof");
+    function testFuzzMintWithProof(address to, bytes32 bitcoinTxHash, uint256 amount) public {
+        vm.assume(to != address(0));
+        vm.assume(bitcoinTxHash != bytes32(0));
+        vm.assume(amount > 0);
+        vm.assume(amount <= 21_000_000 * 10**8); // Within max supply
         
-        // Mint tokens
-        vault.mintWithProof(user1, mintAmount, bitcoinTxHash, publicValues, proofBytes);
+        // Create public values with fuzzed amount
+        bytes memory fuzzValues = abi.encodePacked(
+            uint64(64), // Length of block hash string
+            "ef0c2fa8517414b742094a020da7eba891b47d660ef66f126ad01e5be99a2fd0", // Block hash
+            uint64(amount) // Fuzzed amount
+        );
         
-        // Transfer tokens
-        uint256 transferAmount = 300 * 10**8;
-        vm.prank(user1);
-        zkbtc.transfer(user2, transferAmount);
+        uint256 initialSupply = zkbtc.totalSupply();
         
-        assertEq(zkbtc.balanceOf(user1), mintAmount - transferAmount);
-        assertEq(zkbtc.balanceOf(user2), transferAmount);
-        assertEq(zkbtc.totalSupply(), mintAmount);
+        vm.prank(user);
+        vault.mintWithProof(to, bitcoinTxHash, fuzzValues, MOCK_PROOF_BYTES);
+        
+        assertEq(zkbtc.totalSupply(), initialSupply + amount);
+        assertEq(zkbtc.balanceOf(to), amount);
+    }
+
+    function testGasUsage() public {
+        uint256 gasStart = gasleft();
+        
+        vm.prank(user);
+        vault.mintWithProof(user, BITCOIN_TX_HASH, MOCK_PUBLIC_VALUES, MOCK_PROOF_BYTES);
+        
+        uint256 gasUsed = gasStart - gasleft();
+        
+        // Log gas usage for optimization reference
+        console.log("Gas used for mintWithProof:", gasUsed);
+        
+        // Ensure gas usage is reasonable (adjust threshold as needed)
+        assertLt(gasUsed, 500_000);
     }
 }

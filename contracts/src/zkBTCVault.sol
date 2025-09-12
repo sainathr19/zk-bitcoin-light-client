@@ -61,24 +61,77 @@ contract zkBTCVault is Ownable, ReentrancyGuard {
     }
 
     /**
+     * @dev Internal function to extract block hash from public values
+     * @param publicValues The encoded public values from the zk proof
+     * @return blockHash The extracted block hash from the public values
+     * @notice Format: [8-byte length][block_hash string][8-byte total_amount]
+     */
+    function _extractBlockHashFromPublicValues(bytes calldata publicValues) internal pure returns (string memory blockHash) {
+        // Check minimum length: 8 bytes for length + at least 1 byte for block_hash + 8 bytes for amount
+        if (publicValues.length < 17) {
+            return "";
+        }
+        
+        // Read the length of the block_hash string (first 8 bytes as little-endian uint64)
+        uint64 blockHashLen = uint64(bytes8(publicValues[0:8]));
+        
+        // Check if we have enough data: 8 bytes length + block_hash + 8 bytes amount
+        if (publicValues.length < 8 + blockHashLen + 8) {
+            return "";
+        }
+        
+        // Extract the block_hash string
+        bytes memory blockHashBytes = publicValues[8:8 + blockHashLen];
+        return string(blockHashBytes);
+    }
+
+    /**
+     * @dev Internal function to extract amount from public values
+     * @param publicValues The encoded public values from the zk proof
+     * @return amount The extracted amount from the public values
+     * @notice Format: [8-byte length][block_hash string][8-byte total_amount]
+     */
+    function _extractAmountFromPublicValues(bytes calldata publicValues) internal pure returns (uint256 amount) {
+        // Check minimum length: 8 bytes for length + at least 1 byte for block_hash + 8 bytes for amount
+        if (publicValues.length < 17) {
+            return 0;
+        }
+        
+        // Read the length of the block_hash string (first 8 bytes as little-endian uint64)
+        uint64 blockHashLen = uint64(bytes8(publicValues[0:8]));
+        
+        // Check if we have enough data: 8 bytes length + block_hash + 8 bytes amount
+        if (publicValues.length < 8 + blockHashLen + 8) {
+            return 0;
+        }
+        
+        // Extract the total_amount (last 8 bytes as little-endian uint64)
+        uint64 amountStart = 8 + blockHashLen;
+        amount = uint256(uint64(bytes8(publicValues[amountStart:amountStart + 8])));
+        
+        return amount;
+    }
+
+    /**
      * @dev Main function to mint zkBTC tokens after verifying Bitcoin transaction proof
      * @param to The address to mint tokens to
-     * @param amount The amount of zkBTC tokens to mint (in wei, 8 decimals)
      * @param bitcoinTxHash The Bitcoin transaction hash being proven
      * @param publicValues The encoded public values from the zk proof
      * @param proofBytes The encoded zk proof
      */
     function mintWithProof(
         address to,
-        uint256 amount,
         bytes32 bitcoinTxHash,
         bytes calldata publicValues,
         bytes calldata proofBytes
     ) external nonReentrant {
         // Validate inputs
         if (to == address(0)) revert InvalidRecipient();
-        if (amount == 0) revert ZeroMintAmount();
         if (bitcoinTxHash == bytes32(0)) revert InvalidBitcoinTxHash();
+        
+        // Extract amount from public values
+        uint256 amount = _extractAmountFromPublicValues(publicValues);
+        if (amount == 0) revert ZeroMintAmount();
         
         // Check if total supply would exceed maximum
         if (zkbtcToken.totalSupply() + amount > zkbtcToken.maxSupply()) {
