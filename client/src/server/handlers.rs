@@ -31,8 +31,8 @@ pub struct ProofResponse {
     pub success: bool,
     /// Error message if any
     pub error: Option<String>,
-    /// Total amount sent to target address
-    pub total_amount: Option<u64>,
+    pub public_values: Option<Vec<u8>>,
+    pub proof_bytes: Option<Vec<u8>>,
     /// Execution time in milliseconds
     pub execution_time_ms: Option<u64>,
 }
@@ -93,13 +93,14 @@ pub async fn generate_bitcoin_proof(
 
     // Generate proof using the zkVM
     match generate_proof_internal(&stdin).await {
-        Ok((_, total_amount)) => {
+        Ok(public_values) => {
             let execution_time = start_time.elapsed().as_millis() as u64;
 
             Ok(Json(ProofResponse {
                 success: true,
                 error: None,
-                total_amount: Some(total_amount),
+                public_values: Some(public_values),
+                proof_bytes: None,
                 execution_time_ms: Some(execution_time),
             }))
         }
@@ -110,7 +111,8 @@ pub async fn generate_bitcoin_proof(
             Ok(Json(ProofResponse {
                 success: false,
                 error: Some(ProofError::ProofGenerationFailed(e.to_string()).to_string()),
-                total_amount: None,
+                public_values: None,
+                proof_bytes: None,
                 execution_time_ms: Some(execution_time),
             }))
         }
@@ -118,7 +120,7 @@ pub async fn generate_bitcoin_proof(
 }
 
 /// Internal proof generation logic using SP1 zkVM
-async fn generate_proof_internal(stdin: &SP1Stdin) -> Result<(String, u64), anyhow::Error> {
+async fn generate_proof_internal(stdin: &SP1Stdin) -> Result<Vec<u8>, anyhow::Error> {
     // Initialize the SP1 prover client
     let client = ProverClient::from_env();
 
@@ -155,28 +157,10 @@ async fn generate_proof_internal(stdin: &SP1Stdin) -> Result<(String, u64), anyh
         return Err(anyhow::anyhow!("Invalid public values: insufficient data"));
     }
 
-    // Extract the block_hash string
-    let block_hash_bytes = &public_values[8..8 + block_hash_len];
-    let block_hash = String::from_utf8(block_hash_bytes.to_vec())
-        .map_err(|e| anyhow::anyhow!("Invalid UTF-8 in block_hash: {}", e))?;
-
-    // Extract the total_amount (last 8 bytes as u64)
-    let amount_start = 8 + block_hash_len;
-    let total_amount = u64::from_le_bytes([
-        public_values[amount_start],
-        public_values[amount_start + 1],
-        public_values[amount_start + 2],
-        public_values[amount_start + 3],
-        public_values[amount_start + 4],
-        public_values[amount_start + 5],
-        public_values[amount_start + 6],
-        public_values[amount_start + 7],
-    ]);
-
     // Verify the generated proof locally
     client
         .verify(&proof, &verification_key)
         .map_err(|e| anyhow::anyhow!("Failed to verify proof: {}", e))?;
 
-    Ok((block_hash, total_amount))
+    Ok(public_values.to_vec())
 }
