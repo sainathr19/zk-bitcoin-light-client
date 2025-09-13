@@ -2,12 +2,16 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { connectToDatabase, disconnectFromDatabase } from './config/database';
 import { config } from './config';
+import ordersRouter from './routes/orders';
 
 const app = express();
 
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Routes
+app.use('/orders', ordersRouter);
 
 // Health endpoint
 app.get('/health', (req: Request, res: Response) => {
@@ -25,6 +29,7 @@ const startServer = async () => {
       console.log(`✅ Server is running on port ${config.port}`);
       console.log(`✅ PostgreSQL database connection established`);
       console.log(`✅ Health check available at http://localhost:${config.port}/health`);
+      console.log(`✅ Orders API available at http://localhost:${config.port}/orders`);
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error);

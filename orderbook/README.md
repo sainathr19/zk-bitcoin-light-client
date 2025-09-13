@@ -43,6 +43,72 @@ npm run dev
 ## API Endpoints
 
 - `GET /health` - Returns "Online" status
+- `GET /orders` - Get all orders
+- `POST /orders` - Create a new order
+- `GET /orders/:id` - Get order by ID
+
+### Get All Orders
+
+**GET** `/orders`
+
+Response:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "source_asset": "BTC",
+      "destination_asset": "zkBTC",
+      "amount": 100000000,
+      "status": "created",
+      "created_at": "2024-01-01T00:00:00.000Z",
+      "proof_bytes": null,
+      "public_outputs": null
+    },
+    {
+      "id": 2,
+      "source_asset": "ETH",
+      "destination_asset": "zkETH",
+      "amount": 200000000,
+      "status": "deposit_detected",
+      "created_at": "2024-01-01T01:00:00.000Z",
+      "proof_bytes": null,
+      "public_outputs": null
+    }
+  ]
+}
+```
+
+### Create Order
+
+**POST** `/orders`
+
+Request body:
+```json
+{
+  "source_asset": "BTC",
+  "destination_asset": "zkBTC",
+  "amount": 100000000
+}
+```
+
+Response:
+```json
+{
+  "success": true,
+  "data": {
+    "id": 1,
+    "source_asset": "BTC",
+    "destination_asset": "zkBTC",
+    "amount": 100000000,
+    "status": "created",
+    "created_at": "2024-01-01T00:00:00.000Z",
+    "proof_bytes": null,
+    "public_outputs": null
+  }
+}
+```
 
 ## Project Structure
 
@@ -50,6 +116,14 @@ npm run dev
 - `src/config/` - Configuration files
   - `database.ts` - PostgreSQL connection setup
   - `index.ts` - Environment configuration
+- `src/routes/` - API routes
+  - `orders.ts` - Order management endpoints
+- `src/services/` - Business logic
+  - `orderService.ts` - Order operations
+- `src/types/` - TypeScript type definitions
+  - `order.ts` - Order-related types
+- `src/database/` - Database schema
+  - `schema.sql` - Orders table schema
 - `dist/` - Compiled JavaScript output
 - `package.json` - Dependencies and scripts
 - `tsconfig.json` - TypeScript configuration
