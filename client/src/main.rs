@@ -16,7 +16,7 @@ pub mod server;
 /// The ELF (executable and linkable format) file for the Succinct RISC-V zkVM.
 pub const BITCOIN_PROOF_ELF: &[u8] = include_elf!("fibonacci-program");
 
-const TARGET_ADDRESS: &str = "1JdNy4KCNVQ6ay8qsc52DW1TtS7ZCnvJ5W";
+const TARGET_ADDRESS: &str = "bc1qu5r0uf0jr9zqpkz066uyuxcq7acf3pqgemt8ws";
 
 /// Main server entry point
 #[tokio::main]

@@ -50,6 +50,40 @@ fn compute_wtxid(tx_hex: &str) -> Result<Option<[u8; 32]>, String> {
     Ok(Some(sha256d(&tx_bytes)))
 }
 
+/// Parse a variable-length integer from bytes
+fn parse_varint(data: &[u8]) -> Result<(u64, usize), String> {
+    if data.is_empty() {
+        return Err("Empty data for varint".to_string());
+    }
+
+    match data[0] {
+        0..=252 => Ok((data[0] as u64, 1)),
+        253 => {
+            if data.len() < 3 {
+                return Err("Insufficient data for varint".to_string());
+            }
+            let value = u16::from_le_bytes([data[1], data[2]]) as u64;
+            Ok((value, 3))
+        }
+        254 => {
+            if data.len() < 5 {
+                return Err("Insufficient data for varint".to_string());
+            }
+            let value = u32::from_le_bytes([data[1], data[2], data[3], data[4]]) as u64;
+            Ok((value, 5))
+        }
+        255 => {
+            if data.len() < 9 {
+                return Err("Insufficient data for varint".to_string());
+            }
+            let value = u64::from_le_bytes([
+                data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8],
+            ]);
+            Ok((value, 9))
+        }
+    }
+}
+
 /// Strip witness data from SegWit transaction bytes
 fn strip_witness_data(tx_bytes: &[u8]) -> Result<Vec<u8>, String> {
     if tx_bytes.len() < 6 {
@@ -65,12 +99,11 @@ fn strip_witness_data(tx_bytes: &[u8]) -> Result<Vec<u8>, String> {
 
     // Copy version (4 bytes)
     result.extend_from_slice(&tx_bytes[0..4]);
-
-    // Skip witness marker and flag (2 bytes)
-    let mut cursor = 6;
+    let mut cursor = 6; // Skip version + witness marker + flag
 
     // Parse input count
     let (input_count, input_count_len) = parse_varint(&tx_bytes[cursor..])?;
+    result.extend_from_slice(&tx_bytes[cursor..cursor + input_count_len]);
     cursor += input_count_len;
 
     // Copy inputs (without witness data)
@@ -84,21 +117,29 @@ fn strip_witness_data(tx_bytes: &[u8]) -> Result<Vec<u8>, String> {
 
         // Script length and script
         let (script_len, script_len_len) = parse_varint(&tx_bytes[cursor..])?;
+        result.extend_from_slice(&tx_bytes[cursor..cursor + script_len_len]);
         cursor += script_len_len;
 
-        if cursor + script_len as usize + 4 > tx_bytes.len() {
+        if cursor + script_len as usize > tx_bytes.len() {
             return Err("Transaction too short for input script".to_string());
         }
-        result.extend_from_slice(&tx_bytes[cursor..cursor + script_len as usize + 4]);
-        cursor += script_len as usize + 4;
+        result.extend_from_slice(&tx_bytes[cursor..cursor + script_len as usize]);
+        cursor += script_len as usize;
+
+        // Sequence (4 bytes)
+        if cursor + 4 > tx_bytes.len() {
+            return Err("Transaction too short for sequence".to_string());
+        }
+        result.extend_from_slice(&tx_bytes[cursor..cursor + 4]);
+        cursor += 4;
     }
 
-    // Copy outputs
+    // Parse and copy output count
     let (output_count, output_count_len) = parse_varint(&tx_bytes[cursor..])?;
+    result.extend_from_slice(&tx_bytes[cursor..cursor + output_count_len]);
     cursor += output_count_len;
 
-    result.extend_from_slice(&tx_bytes[cursor - output_count_len..cursor]);
-
+    // Copy outputs
     for _ in 0..output_count {
         // Value (8 bytes)
         if cursor + 8 > tx_bytes.len() {
@@ -109,6 +150,7 @@ fn strip_witness_data(tx_bytes: &[u8]) -> Result<Vec<u8>, String> {
 
         // Script length and script
         let (script_len, script_len_len) = parse_varint(&tx_bytes[cursor..])?;
+        result.extend_from_slice(&tx_bytes[cursor..cursor + script_len_len]);
         cursor += script_len_len;
 
         if cursor + script_len as usize > tx_bytes.len() {
@@ -118,9 +160,7 @@ fn strip_witness_data(tx_bytes: &[u8]) -> Result<Vec<u8>, String> {
         cursor += script_len as usize;
     }
 
-    // Skip witness data section (for SegWit transactions)
-    // The witness section comes after outputs and before locktime
-    // We need to skip all witness data for each input
+    // Skip witness data section completely
     for _ in 0..input_count {
         // Parse witness stack count
         let (witness_count, witness_count_len) = parse_varint(&tx_bytes[cursor..])?;
@@ -391,39 +431,39 @@ fn parse_tx_outputs(tx_hex: &str) -> Result<Vec<(String, u64)>, String> {
     Ok(outputs)
 }
 
-/// Parse variable-length integer (varint)
-fn parse_varint(data: &[u8]) -> Result<(u64, usize), String> {
-    if data.is_empty() {
-        return Err("empty varint".into());
-    }
+// /// Parse variable-length integer (varint)
+// fn parse_varint(data: &[u8]) -> Result<(u64, usize), String> {
+//     if data.is_empty() {
+//         return Err("empty varint".into());
+//     }
 
-    match data[0] {
-        0xfd => {
-            if data.len() < 3 {
-                return Err("varint too short for 0xfd".into());
-            }
-            let value = u16::from_le_bytes([data[1], data[2]]);
-            Ok((value as u64, 3))
-        }
-        0xfe => {
-            if data.len() < 5 {
-                return Err("varint too short for 0xfe".into());
-            }
-            let value = u32::from_le_bytes([data[1], data[2], data[3], data[4]]);
-            Ok((value as u64, 5))
-        }
-        0xff => {
-            if data.len() < 9 {
-                return Err("varint too short for 0xff".into());
-            }
-            let value = u64::from_le_bytes([
-                data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8],
-            ]);
-            Ok((value, 9))
-        }
-        n => Ok((n as u64, 1)),
-    }
-}
+//     match data[0] {
+//         0xfd => {
+//             if data.len() < 3 {
+//                 return Err("varint too short for 0xfd".into());
+//             }
+//             let value = u16::from_le_bytes([data[1], data[2]]);
+//             Ok((value as u64, 3))
+//         }
+//         0xfe => {
+//             if data.len() < 5 {
+//                 return Err("varint too short for 0xfe".into());
+//             }
+//             let value = u32::from_le_bytes([data[1], data[2], data[3], data[4]]);
+//             Ok((value as u64, 5))
+//         }
+//         0xff => {
+//             if data.len() < 9 {
+//                 return Err("varint too short for 0xff".into());
+//             }
+//             let value = u64::from_le_bytes([
+//                 data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8],
+//             ]);
+//             Ok((value, 9))
+//         }
+//         n => Ok((n as u64, 1)),
+//     }
+// }
 
 /// Extract P2PKH address from script (simplified)
 fn extract_p2pkh_address(script: &[u8]) -> Result<String, String> {
@@ -682,8 +722,8 @@ mod tests {
     #[test]
     fn test_verify_txid() {
         // Test with valid txid and tx hex
-        let tx_hex = "010000000536a007284bd52ee826680a7f43536472f1bcce1e76cd76b826b88c5884eddf1f0c0000006b483045022100bcdf40fb3b5ebfa2c158ac8d1a41c03eb3dba4e180b00e81836bafd56d946efd022005cc40e35022b614275c1e485c409599667cbd41f6e5d78f421cb260a020a24f01210255ea3f53ce3ed1ad2c08dfc23b211b15b852afb819492a9a0f3f99e5747cb5f0ffffffffee08cb90c4e84dd7952b2cfad81ed3b088f5b32183da2894c969f6aa7ec98405020000006a47304402206332beadf5302281f88502a53cc4dd492689057f2f2f0f82476c1b5cd107c14a02207f49abc24fc9d94270f53a4fb8a8fbebf872f85fff330b72ca91e06d160dcda50121027943329cc801a8924789dc3c561d89cf234082685cbda90f398efa94f94340f2ffffffff36a007284bd52ee826680a7f43536472f1bcce1e76cd76b826b88c5884eddf1f060000006b4830450221009c97a25ae70e208b25306cc870686c1f0c238100e9100aa2599b3cd1c010d8ff0220545b34c80ed60efcfbd18a7a22f00b5f0f04cfe58ca30f21023b873a959f1bd3012102e54cd4a05fe29be75ad539a80e7a5608a15dffbfca41bec13f6bf4a32d92e2f4ffffffff73cabea6245426bf263e7ec469a868e2e12a83345e8d2a5b0822bc7f43853956050000006b483045022100b934aa0f5cf67f284eebdf4faa2072345c2e448b758184cee38b7f3430129df302200dffac9863e03e08665f3fcf9683db0000b44bf1e308721eb40d76b180a457ce012103634b52718e4ddf125f3e66e5a3cd083765820769fd7824fd6aa38eded48cd77fffffffff36a007284bd52ee826680a7f43536472f1bcce1e76cd76b826b88c5884eddf1f0b0000006a47304402206348e277f65b0d23d8598944cc203a477ba1131185187493d164698a2b13098a02200caaeb6d3847b32568fd58149529ef63f0902e7d9c9b4cc5f9422319a8beecd50121025af6ba0ccd2b7ac96af36272ae33fa6c793aa69959c97989f5fa397eb8d13e69ffffffff0400e6e849000000001976a91472d52e2f5b88174c35ee29844cce0d6d24b921ef88ac20aaa72e000000001976a914c15b731d0116ef8192f240d4397a8cdbce5fe8bc88acf02cfa51000000001976a914c7ee32e6945d7de5a4541dd2580927128c11517488acf012e39b000000001976a9140a59837ccd4df25adc31cdad39be6a8d97557ed688ac00000000";
-        let txid_hex = "15e10745f15593a899cef391191bdd3d7c12412cc4696b7bcb669d0feadc8521";
+        let tx_hex = "020000000001015e315a6f57dab6de96b319d2129a5ff8f36df45dd927258f4d4f84313a9d6c1f0100000000fdffffff02d908160200000000160014192e80ed2c7c412bdc2a6c8f371d15cb90f3c85b7e3602000000000016001474c448ee64f6abed1fe7ab8cb3ae70351fcfc1140247304402200c56079923d8490b78e6d897a2e05a8ab11d7cd674877b398d634326662a592f02204f7199d97f4e543201076dd1f9b082efb3c28cfb086a9e3fbd4a2743cd840259012103b01bd095f648ea829f000207087f16622431077bb5cc0875225ada601375c88500000000";
+        let txid_hex = "2f13bb9ec27ce02c9ecf5ff3348b6a8ddaf7c4beebb361a3d1af0d4109c225c0";
 
         let result = verify_txid(txid_hex, tx_hex);
         assert!(result.is_ok());
