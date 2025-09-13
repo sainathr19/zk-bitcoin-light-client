@@ -2,7 +2,7 @@ use axum::{http::StatusCode, response::Json};
 
 use serde::{Deserialize, Serialize};
 use sp1_sdk::{include_elf, ProverClient, SP1Stdin};
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::TARGET_ADDRESS;
 
@@ -82,6 +82,8 @@ pub async fn generate_bitcoin_proof(
 ) -> Result<Json<ProofResponse>, StatusCode> {
     let start_time = std::time::Instant::now();
 
+    info!("Generating proof");
+
     // Setup input for the zkVM
     let mut stdin = SP1Stdin::new();
     stdin.write(&request.tx);
@@ -95,7 +97,7 @@ pub async fn generate_bitcoin_proof(
     match generate_proof_internal(&stdin).await {
         Ok(public_values) => {
             let execution_time = start_time.elapsed().as_millis() as u64;
-
+            info!("Proof Generated");
             Ok(Json(ProofResponse {
                 success: true,
                 error: None,

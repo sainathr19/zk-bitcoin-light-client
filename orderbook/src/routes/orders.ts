@@ -26,13 +26,13 @@ router.get('/', async (req: Request, res: Response) => {
 // Create order endpoint
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { source_asset, destination_asset, amount }: CreateOrderRequest = req.body;
+    const { source_asset, destination_asset, source_address, destination_address, amount }: CreateOrderRequest = req.body;
 
     // Validation
-    if (!source_asset || !destination_asset || amount === undefined) {
+    if (!source_asset || !destination_asset || !source_address || !destination_address || amount === undefined) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: source_asset, destination_asset, amount'
+        error: 'Missing required fields: source_asset, destination_asset, source_address, destination_address, amount'
       });
     }
 
@@ -43,16 +43,19 @@ router.post('/', async (req: Request, res: Response) => {
       });
     }
 
-    if (typeof source_asset !== 'string' || typeof destination_asset !== 'string') {
+    if (typeof source_asset !== 'string' || typeof destination_asset !== 'string' || 
+        typeof source_address !== 'string' || typeof destination_address !== 'string') {
       return res.status(400).json({
         success: false,
-        error: 'source_asset and destination_asset must be strings'
+        error: 'source_asset, destination_asset, source_address, and destination_address must be strings'
       });
     }
 
     const result = await OrderService.createOrder({
       source_asset,
       destination_asset,
+      source_address,
+      destination_address,
       amount
     });
 
@@ -73,12 +76,14 @@ router.post('/', async (req: Request, res: Response) => {
 // Get order by ID endpoint
 router.get('/:id', async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = req.params.id;
 
-    if (isNaN(id)) {
+    // Basic UUID format validation
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(id)) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid order ID'
+        error: 'Invalid order ID format'
       });
     }
 

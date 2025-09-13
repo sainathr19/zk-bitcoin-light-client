@@ -3,6 +3,7 @@ import cors from 'cors';
 import { connectToDatabase, disconnectFromDatabase } from './config/database';
 import { config } from './config';
 import ordersRouter from './routes/orders';
+import { AddressGenerator } from './services/addressGenerator';
 
 const app = express();
 
@@ -24,10 +25,17 @@ const startServer = async () => {
     // Connect to PostgreSQL
     await connectToDatabase();
     
+    // Initialize address generator with mnemonic
+    if (!config.mnemonic) {
+      throw new Error('MNEMONIC environment variable is required');
+    }
+    AddressGenerator.initialize(config.mnemonic);
+    
     // Start the server
     app.listen(config.port, () => {
       console.log(`✅ Server is running on port ${config.port}`);
       console.log(`✅ PostgreSQL database connection established`);
+      console.log(`✅ Address generator initialized`);
       console.log(`✅ Health check available at http://localhost:${config.port}/health`);
       console.log(`✅ Orders API available at http://localhost:${config.port}/orders`);
     });
