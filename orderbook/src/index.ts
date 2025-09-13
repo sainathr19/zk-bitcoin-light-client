@@ -1,8 +1,9 @@
 import express, { Request, Response } from 'express';
 import cors from 'cors';
+import { connectToDatabase, disconnectFromDatabase } from './config/database';
+import { config } from './config';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
@@ -14,9 +15,37 @@ app.get('/health', (req: Request, res: Response) => {
 });
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-  console.log(`Health check available at http://localhost:${PORT}/health`);
+const startServer = async () => {
+  try {
+    // Connect to PostgreSQL
+    await connectToDatabase();
+    
+    // Start the server
+    app.listen(config.port, () => {
+      console.log(`✅ Server is running on port ${config.port}`);
+      console.log(`✅ PostgreSQL database connection established`);
+      console.log(`✅ Health check available at http://localhost:${config.port}/health`);
+    });
+  } catch (error) {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  }
+};
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('Received SIGINT, shutting down gracefully...');
+  await disconnectFromDatabase();
+  process.exit(0);
 });
+
+process.on('SIGTERM', async () => {
+  console.log('Received SIGTERM, shutting down gracefully...');
+  await disconnectFromDatabase();
+  process.exit(0);
+});
+
+// Start the server
+startServer();
 
 export default app;
